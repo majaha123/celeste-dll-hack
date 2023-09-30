@@ -116,7 +116,13 @@ HWND WindowsManager::CreateDLLWindow()
 {
     if (DLLWindow == NULL)
     {
-        DLLWindow = CCreateWindow(DLL_window_classname, WS_OVERLAPPEDWINDOW, 0, 100, 100, 1000, 1000, "WWW");
+        DLLWindow = CCreateWindow(DLL_window_classname,
+                                  WS_OVERLAPPEDWINDOW,
+                                  NULL, CW_USEDEFAULT,
+                                  CW_USEDEFAULT,
+                                  CW_USEDEFAULT,
+                                  CW_USEDEFAULT,
+                                  "WWW");
 
         if (DLLWindow == NULL)
         {

@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.11)
 
 project(
     celeste_dll_1
-    VERSION 0.1
-    DESCRIPTION "My first hacking dll for Celeste game"
+    VERSION 0.2
+    DESCRIPTION "DLL for hacking celeste game"
     LANGUAGES C CXX
 )
 

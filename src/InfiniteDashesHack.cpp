@@ -9,7 +9,11 @@
 #include "Logger.hpp"
 #include "WindowsManager.hpp"
 
-#define TOGGLE 3
+enum
+{
+    TOGGLE = 3,
+    SEARCH
+};
 
 InfiniteDashesHack *InfiniteDashesHack::hack = NULL;
 
@@ -40,8 +44,6 @@ const std::vector<unsigned char> hacked_get_Max_Dashes_code = {
     0xff,
     0x00,
     0x00};
-
-bool turned_on = false;
 
 const std::vector<int> signature = {
     0x83,
@@ -82,6 +84,9 @@ LRESULT CALLBACK InfiniteDashesHackPROC(HWND hwnd, UINT message, WPARAM wParam, 
         case TOGGLE:
             InfiniteDashesHack::getHack()->Update(NULL);
             break;
+        case SEARCH:
+            InfiniteDashesHack::getHack()->startSearchingEntryAddress();
+            break;
         default:
             break;
         };
@@ -97,7 +102,13 @@ LRESULT CALLBACK InfiniteDashesHackPROC(HWND hwnd, UINT message, WPARAM wParam, 
 
 DWORD WINAPI findEntryThread(LPVOID params)
 {
+    HANDLE mutex = InfiniteDashesHack::getHack()->entryMutex;
+
+    WaitForSingleObject(mutex, INFINITE);
+
     DWORD Entry = InfiniteDashesHack::getHack()->findEntryAddress();
+
+    ReleaseMutex(mutex);
 
     DWORD status = NULL;
 
@@ -160,41 +171,138 @@ BOOL InfiniteDashesHack::setStatus(DWORD status)
         break;
     }
 
+    WaitForSingleObject(statusMutex, INFINITE);
+
     SetWindowText(statusWindow, statusText.c_str());
 
-    return 1;
+    ReleaseMutex(statusMutex);
+
+    return TRUE;
 }
 
-BOOL InfiniteDashesHack::Init()
+DWORD InfiniteDashesHack::getStatus()
+{
+    WaitForSingleObject(statusMutex, INFINITE);
+
+    DWORD retValue = searchingStatus;
+
+    ReleaseMutex(statusMutex);
+
+    return retValue;
+}
+
+BOOL InfiniteDashesHack::setTurnedOnOff(bool turnedOn)
+{
+    this->turned_on = turnedOn;
+
+    std::string str;
+
+    if (turned_on)
+    {
+        str = "Turned on";
+    }
+    else
+    {
+        str = "Turned off";
+    }
+
+    SetWindowText(turnedOnOffWindow, str.c_str());
+
+    return TRUE;
+}
+
+VOID InfiniteDashesHack::startSearchingEntryAddress()
+{
+    if (findEntryHandle != NULL)
+    {
+        if (TerminateThread(findEntryHandle, 0) == NULL)
+        {
+            std::stringstream ss;
+            ss << "Failed to terminate thread, " << GetLastError();
+
+            Logger::Error(ss.str());
+        }
+        else if (CloseHandle(findEntryHandle) == NULL)
+        {
+            std::stringstream ss;
+            ss << "Failed to close handle, " << GetLastError();
+
+            Logger::Error(ss.str());
+        }
+    }
+
+    if (entryMutex != NULL)
+    {
+        setStatus(SEARCHING);
+
+        findEntryHandle = CreateThread(NULL, 0, findEntryThread, NULL, 0, NULL);
+        // CloseHandle(findEntryHandle);
+    }
+}
+
+BOOL InfiniteDashesHack::initWindow()
 {
     BOOL status = 1;
-
-    status = status * WindowsManager::CreateClass(getWNDClassName().c_str(), getWNDPROC());
 
     hwnd = WindowsManager::CCreateWindow(getWNDClassName().c_str(),
                                          WS_VISIBLE | WS_CHILD | WS_BORDER,
                                          WindowsManager::CreateDLLWindow(),
                                          10, 10, 250, 250);
 
-    button = WindowsManager::CCreateWindow(
-        "button",
+    hackNameWindow = WindowsManager::CCreateWindow(
+        "static",
         WS_VISIBLE | WS_CHILD,
         hwnd,
-        25, 250 - 10, 200, 100,
-        "toggle",
-        (HMENU)TOGGLE);
+        25, 10, 95, 100,
+        "Infinite dashes");
 
     statusWindow = WindowsManager::CCreateWindow(
         "static",
         WS_VISIBLE | WS_CHILD,
         hwnd,
-        25, 10, 200, 100,
+        25 + 100, 10, 45, 100,
         "Searching");
 
-    if (hwnd == NULL || button == NULL)
+    turnedOnOffWindow = WindowsManager::CCreateWindow(
+        "static",
+        WS_VISIBLE | WS_CHILD,
+        hwnd,
+        25 + 100 + 50, 10, 45, 100,
+        "Turned off");
+
+    toggleButton = WindowsManager::CCreateWindow(
+        "button",
+        WS_VISIBLE | WS_CHILD,
+        hwnd,
+        25, 250 - 10 - 100, 95, 100,
+        "Toggle",
+        (HMENU)TOGGLE);
+
+    entryButton = WindowsManager::CCreateWindow(
+        "button",
+        WS_VISIBLE | WS_CHILD,
+        hwnd,
+        25 + 100, 250 - 10 - 100, 95, 100,
+        "Search for address",
+        (HMENU)SEARCH);
+
+    if (hwnd == NULL || toggleButton == NULL || entryButton == NULL || statusWindow == NULL || turnedOnOffWindow == NULL)
     {
         status = 0;
     }
+
+    return status;
+}
+
+BOOL InfiniteDashesHack::Init()
+{
+    BOOL status = 1;
+
+    turned_on = false;
+
+    status = status * WindowsManager::CreateClass(getWNDClassName().c_str(), getWNDPROC());
+
+    status = status * initWindow();
 
     if (status == NULL)
     {
@@ -210,23 +318,33 @@ BOOL InfiniteDashesHack::Init()
         }
     }
 
-    setStatus(SEARCHING);
+    entryMutex = CreateMutex(NULL, FALSE, NULL);
+    statusMutex = CreateMutex(NULL, FALSE, NULL);
 
-    findEntryHandle = CreateThread(NULL, 0, findEntryThread, NULL, 0, NULL);
-    CloseHandle(findEntryHandle);
+    if (entryMutex == NULL)
+    {
+        status = 0;
+
+        std::stringstream ss;
+        ss << "Failed to initialize mutex " << GetLastError();
+
+        Logger::Error(ss.str());
+    }
+
+    startSearchingEntryAddress();
 
     return status;
 }
 
 void InfiniteDashesHack::Update(void *params)
 {
-    if (Entry != NULL)
+    if (Entry != NULL && getStatus() == FOUND)
     {
         std::vector<unsigned char> mem_code = turned_on ? old_get_Max_Dashes_code : hacked_get_Max_Dashes_code;
 
         memcpy((void *)Entry, mem_code.data(), mem_code.size());
 
-        turned_on = !turned_on;
+        setTurnedOnOff(!turned_on);
 
         if (turned_on)
         {
